@@ -2,6 +2,7 @@
 #include <algorithm>
 #include <functional>
 #include <iostream>
+#include <iterator>
 #include <list>
 #include <memory>
 #include <stdexcept>
@@ -219,22 +220,7 @@ int main() {
 
 
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
+// REALIZATION /////////////////////////////////////////////////////////
 
 size_t ReadMemorySize(std::istream& stream) {
   size_t memory_size;
@@ -259,7 +245,6 @@ std::vector<MemoryManagerQuery> ReadMemoryManagerQueries(
       queries.push_back(MemoryManagerQuery(free_query));
     }
   }
-
   return queries;
 }
 
@@ -307,16 +292,16 @@ std::vector<MemoryManagerAllocationResponse> RunMemoryManager(
     if (auto query_pointer = query.AsAllocationQuery()) {
       auto result = memory_manager.Allocate(query_pointer->allocation_size);
       results[query_n] = result;
-      if (result._M_node) {
+      if (result != memory_manager.end()) {
         responses.push_back(MakeSuccessfulAllocation(result->left));
       } else {
         responses.push_back(MakeFailedAllocation());
       }
     } else if (auto query_pointer = query.AsFreeQuery()) {
-      results[query_n] = MemoryManager::Iterator(nullptr);
-      auto result = results[query_pointer->allocation_query_index];
-      if (result._M_node) {
-        memory_manager.Free(result);
+      results[query_n] = memory_manager.end();
+      auto query_index = query_pointer->allocation_query_index;
+      if (results[query_index] != memory_manager.end()) {
+        memory_manager.Free(results[query_index]);
       }
     } else {
       throw std::logic_error("Unknown Memory Manager query!");
@@ -365,12 +350,12 @@ MemoryManager::MemoryManager(size_t memory_size)
 
 
 MemoryManager::Iterator MemoryManager::Allocate(size_t size) {
-  if (free_memory_segments_.size() == 0) {
-    return Iterator(nullptr);
+  if (free_memory_segments_.empty()) {
+    return end();
   }
   auto max_free_memory_segment_iterator = free_memory_segments_.top();
   if (size > max_free_memory_segment_iterator->Size()) {
-    return Iterator(nullptr);
+    return end();
   }
   if (size == max_free_memory_segment_iterator->Size()) {
     free_memory_segments_.erase(max_free_memory_segment_iterator->heap_index);
@@ -389,10 +374,8 @@ MemoryManager::Iterator MemoryManager::Allocate(size_t size) {
 
 
 void MemoryManager::Free(Iterator position) {
-  auto left_iterator = position;
-  --left_iterator;
-  auto right_iterator = position;
-  ++right_iterator;
+  auto left_iterator = std::prev(position);
+  auto right_iterator = std::next(position);
   if (position != memory_segments_.begin()) {
     AppendIfFree(position, left_iterator);
   }
@@ -447,7 +430,7 @@ MemorySegment::MemorySegment(int left, int right)
 
 
 size_t MemorySegment::Size() const {
-  return right >= left ? right - left : 0;
+  return right - left;
 }
 
 
@@ -501,10 +484,7 @@ const T& Heap<T, Compare>::top() const {
 
 template <class T, class Compare>
 void Heap<T, Compare>::pop() {
-  SwapElements(0, this->size() - 1);
-  NotifyIndexChange(elements_.back(), kNullIndex);
-  elements_.pop_back();
-  SiftDown(0);
+  erase(0);
 }
 
 
@@ -522,7 +502,7 @@ bool Heap<T, Compare>::empty() const {
 
 template <class T, class Compare>
 size_t Heap<T, Compare>::Parent(size_t index) const {
-  return index ? (index - 1) / 2 : index;
+  return index ? (index - 1) / 2 : kNullIndex;
 }
 
 
@@ -552,7 +532,9 @@ bool Heap<T, Compare>::CompareElements(
 template <class T, class Compare>
 void Heap<T, Compare>::NotifyIndexChange(
     const T& element, size_t new_element_index) {
-  index_change_observer_(element, new_element_index);
+  if (index_change_observer_) {
+    index_change_observer_(element, new_element_index);
+  }
 }
 
 
@@ -566,17 +548,11 @@ void Heap<T, Compare>::SwapElements(size_t first_index, size_t second_index) {
 
 template <class T, class Compare>
 size_t Heap<T, Compare>::SiftUp(size_t index) {
-  auto new_index = index;
-  while (index != 0) {
-    if (CompareElements(index, Parent(index))) {
-      SwapElements(index, Parent(index));
-      index = Parent(index);
-    } else {
-      new_index = index;
-      index = 0;
-    }
+  while (Parent(index) != kNullIndex && CompareElements(index, Parent(index))) {
+    SwapElements(index, Parent(index));
+    index = Parent(index);
   }
-  return new_index;
+  return index;
 }
 
 
